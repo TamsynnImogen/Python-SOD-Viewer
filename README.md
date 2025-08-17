@@ -14,11 +14,11 @@
 
 #### Linux tkinter packages:
 
--- Debian/Ubuntu: sudo apt install python3-tk
+- Debian/Ubuntu: sudo apt install python3-tk
 
--- Fedora: sudo dnf install python3-tkinter
+- Fedora: sudo dnf install python3-tkinter
 
--- Arch: sudo pacman -S tk
+- Arch: sudo pacman -S tk
 
 ### Quick install
 #### (optional but recommended) create a venv
