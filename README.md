@@ -97,3 +97,7 @@ Formats: .tga and .dds (case-insensitive).
 - Textures not found: Use L to set the correct base. Press D to see where it looked.
 
 - Wireframe or face flip hides the UI: The viewer forces a separate 2D UI pass; if text still looks odd, ensure you’re on pyglet 2.x.
+
+
+##### Credits
+- somaZ for their work on the SOD plugin for Blender
