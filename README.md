@@ -100,4 +100,4 @@ Formats: .tga and .dds (case-insensitive).
 
 
 ##### Credits
-- somaZ for their work on the SOD plugin for Blender
+- SomaZ for their work on the SOD plugin for Blender
