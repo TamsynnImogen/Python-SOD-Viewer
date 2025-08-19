@@ -3,6 +3,9 @@ name: Build SOD Viewer
 on:
   push:
     branches: main
+    paths-ignore:
+      - "**.md"
+      - ".gitignore"
 
 jobs:
   build-windows:
