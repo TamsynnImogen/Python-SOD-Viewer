@@ -47,6 +47,8 @@ jobs:
           architecture: 'x64'
       - name: Install requirements
         run: |
+          sudo apt-get -qq update
+          sudo apt-get install python3-tk
           pip install -r requirements.txt
           pip install pyinstaller
       - name: Run PyInstaller
