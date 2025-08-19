@@ -31,7 +31,7 @@ SUPPORTED_VERSIONS = (1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 1.91, 1.92, 1.93)
 @dataclass
 class Identifier:
     name: str = ""
-        
+
     @classmethod
     def from_file(cls, file) -> Identifier:
         self = cls()
@@ -39,7 +39,14 @@ class Identifier:
         if length < 1:
             self.name = None
             return self
-        self.name = struct.unpack("<{}s".format(length), file.read(length))[0].decode()
+        raw = struct.unpack(f"<{length}s", file.read(length))[0]
+        try:
+            self.name = raw.decode('utf-8')
+        except UnicodeDecodeError:
+            try:
+                self.name = raw.decode('cp1252')
+            except UnicodeDecodeError:
+                self.name = raw.decode('latin-1', errors='replace')
         return self
     
     def to_bytearray(self) -> bytearray:
@@ -95,9 +102,7 @@ class Face:
     @classmethod
     def from_file(cls, file) -> Face:
         self = cls()
-        self.indices = []
-        self.tc_indices = []
-        for i in range(3):
+        for _ in range(3):
             self.indices.append(struct.unpack("<H", file.read(2))[0])
             self.tc_indices.append(struct.unpack("<H", file.read(2))[0])
         return self
@@ -119,9 +124,7 @@ class Vertex_group:
         self = cls()
         num_faces = struct.unpack("<H", file.read(2))[0]
         self.material = Identifier.from_file(file).name
-        self.faces = []
-        for i in range(num_faces):
-            self.faces.append(Face.from_file(file))
+        self.faces = [Face.from_file(file) for _ in range(num_faces)]
         return self
     
     def to_bytearray(self) -> bytearray:
@@ -150,51 +153,41 @@ class Mesh:
     @classmethod
     def from_file(cls, file, sod_version) -> Mesh:
         self = cls()
-
-        if (sod_version >= 1.7):
+        if sod_version >= 1.7:
             self.material = Identifier.from_file(file).name
         else:
             self.material = "default"
-
         num_textures = 1
-        if (sod_version >= 1.93):
-            mesh_flags = struct.unpack("<I", file.read(4))[0] # 0, 4 or 6
+        if sod_version >= 1.93:
+            mesh_flags = struct.unpack("<I", file.read(4))[0]
             if mesh_flags & 4:
                 self.illumination = True
             num_textures = struct.unpack("<I", file.read(4))[0]
-
         self.texture = Identifier.from_file(file).name
         self.bumpmap = None
-
-        if (sod_version == 1.91):
-            unknown_texinfo = file.read(2)
-        elif (sod_version == 1.92):
+        if sod_version == 1.91:
+            file.read(2)
+        elif sod_version == 1.92:
             self.assimilation_texture = Identifier.from_file(file).name
-            unknown_texinfo = struct.unpack("<H", file.read(2))[0] # always 0
-        elif (sod_version >= 1.93):
-            unknown_info = struct.unpack("<I", file.read(4))[0] # always 0
-
+            _ = struct.unpack("<H", file.read(2))[0]
+        elif sod_version >= 1.93:
+            _ = struct.unpack("<I", file.read(4))[0]
             if num_textures == 2:
                 self.bumpmap = Identifier.from_file(file).name
-                bump_type = struct.unpack("<I", file.read(4))[0] # always 512 in vanilla files
+                bump_type = struct.unpack("<I", file.read(4))[0]
                 if not (bump_type & 512):
                     self.use_heightmap = False
-
             self.assimilation_texture = Identifier.from_file(file).name
-            unknown_texinfo = struct.unpack("<H", file.read(2))[0] #always 0
-
+            _ = struct.unpack("<H", file.read(2))[0]
         num_vertices = struct.unpack("<H", file.read(2))[0]
         num_tcs = struct.unpack("<H", file.read(2))[0]
         num_groups = struct.unpack("<H", file.read(2))[0]
-        
-        self.verts = [struct.unpack("<3f", file.read(12)) for v in range(num_vertices)]
-        self.tcs = [struct.unpack("<2f", file.read(8)) for t in range(num_tcs)]
-        self.groups = [Vertex_group.from_file(file) for g in range(num_groups)]
+        self.verts  = [struct.unpack("<3f", file.read(12)) for _ in range(num_vertices)]
+        self.tcs    = [struct.unpack("<2f", file.read(8))  for _ in range(num_tcs)]
+        self.groups = [Vertex_group.from_file(file) for _ in range(num_groups)]
         self.cull_type = struct.unpack("<b", file.read(1))[0]
-
         unknown = struct.unpack("<H", file.read(2))[0]
-        for i in range(unknown):
-            file.read(2)
+        for _ in range(unknown): file.read(2)
         return self
     
     def to_bytearray(self, sod_version = 1.8) -> bytearray:
@@ -261,13 +254,13 @@ class Node:
         self.type = struct.unpack("<H", file.read(2))[0]
         self.name = Identifier.from_file(file).name
         self.root = Identifier.from_file(file).name
-        self.mat34 = struct.unpack("<12f", file.read(12*4))
+        self.mat34 = struct.unpack("<12f", file.read(48))
         if self.type == 12:
             self.emitter = Identifier.from_file(file).name
         elif self.type == 1:
             self.mesh = Mesh.from_file(file, sod_version)
         elif self.type not in VALID_NODE_TYPES:
-            print("Error in file. Incorrect node type found. Node:", self.name, "Type:", self.type)
+            print("Warning: unexpected node type", self.type, "in", self.name)
         return self
     
     def to_bytearray(self, sod_version = 1.8) -> bytearray:
@@ -366,69 +359,43 @@ class SOD:
     @classmethod
     def from_file_path(cls, file_path) -> SOD:
         self = cls()
-        materials = {}
-        nodes = {}
-        channels = {}
-        references = {}
+        materials, nodes, channels, references = {}, {}, {}, {}
         with open(file_path, "rb") as file:
             ident = file.read(10).decode()
-            if ident != "Storm3D_SW" and ident != "StarTrekDB":
-                raise Exception("Not a valid sod file. File ident was {}. Expected 'Storm3D_SW' or 'StarTrekDB'".format(ident))
-
-            version = file.read(4)
-            self.version = round(struct.unpack("<f", version)[0], 2)
-            print("File:", file_path.replace("\\", "/").rsplit("/", 1)[1], self.version)
-
+            if ident not in ("Storm3D_SW", "StarTrekDB"):
+                raise Exception(f"Not a valid SOD. ident={ident}")
+            self.version = round(struct.unpack("<f", file.read(4))[0], 2)
             if self.version in (1.4, 1.5, 1.6):
                 whatever = struct.unpack("<H", file.read(2))[0]
-                for i in range(whatever):
-                    len = struct.unpack("<H", file.read(2))[0]
-                    text = struct.unpack("<{}s".format(len), file.read(len))[0].decode()
-                    len = struct.unpack("<H", file.read(2))[0]
-                    text = struct.unpack("<{}s".format(len), file.read(len))[0].decode()
+                for _ in range(whatever):
+                    l = struct.unpack("<H", file.read(2))[0]; file.read(l)
+                    l = struct.unpack("<H", file.read(2))[0]; file.read(l)
                     file.read(7)
-                    
             elif self.version not in SUPPORTED_VERSIONS:
-                raise Exception("Not a supported sod file. File version was {}".format(self.version))
-
+                raise Exception(f"Unsupported SOD version {self.version}")
             num_mats = struct.unpack("<H", file.read(2))[0]
-            print("Materials:", num_mats)
             for i in range(num_mats):
                 material = Material.from_file(file, self.version)
                 materials[material.name] = material
-
             num_nodes = struct.unpack("<H", file.read(2))[0]
-            print("Nodes:", num_nodes)
-            for i in range(num_nodes):
+            for _ in range(num_nodes):
                 node = Node.from_file(file, self.version)
                 nodes[node.name] = node
-
             num_animation_channels = struct.unpack("<H", file.read(2))[0]
-            print("Mesh Animations", num_animation_channels)
             for i in range(num_animation_channels):
                 channel = Animation_channel.from_file(file)
                 if channel.name in channels:
                     channels[channel.name].append(channel)
                     continue
                 channels[channel.name] = [channel]
-
-            if self.version in (1.4, 1.5):
-                self.nodes = nodes
-                self.materials = materials
-                self.channels = channels
-                self.references = {}
-                return self
-
-            num_animation_references = struct.unpack("<H", file.read(2))[0]
-            print("Texture Animations", num_animation_references)
-            for i in range(num_animation_references):
-                reference = Animation_reference.from_file(file, self.version)
-                references[reference.node] = reference
-
-        self.nodes = nodes
-        self.materials = materials
-        self.channels = channels
-        self.references = references
+            if self.version not in (1.4, 1.5):
+                num_animation_references = struct.unpack("<H", file.read(2))[0]
+                for i in range(num_animation_references):
+                    reference = Animation_reference.from_file(file, self.version)
+                    references[reference.node] = reference
+        self.version, self.materials, self.nodes, self.channels, self.references = (
+            self.version, materials, nodes, channels, references
+        )
         return self
     
     def to_file(self, file_path):
