@@ -709,116 +709,15 @@ def run_viewer(start_path: str | None = None, base_dir: str | None = None, trace
         if have_borg_root[0]: print(f"[borg] tagged {borg_tag_count} group(s) as Borg branch. Press B to toggle.")
         if anim_len_seconds > 0: print("[anim] press A to play/pause.")
 
-    # --------- saving ---------
-    def write_identifier(f, name: str | None):
-        if not name:
-            f.write(struct.pack("<H", 0)); return
-        data = name.encode('utf-8')
-        f.write(struct.pack("<H", len(data)))
-        f.write(struct.pack(f"<{len(data)}s", data))
-
     def save_as_sod(out_path: str, target_version: float):
         sod = loaded_sod[0]
         if not sod:
             print("[save] nothing loaded."); return
         if target_version not in (1.8, 1.93):
             print("[save] only 1.8 and 1.93 supported."); return
-
-        with open(out_path, "wb") as f:
-            f.write(b"Storm3D_SW")
-            f.write(struct.pack("<f", target_version))
-
-            mat_names = []
-            seen = set()
-            for n in sod.nodes.values():
-                if n.mesh:
-                    for m in [n.mesh.material] + [g.material for g in n.mesh.groups]:
-                        m = m or "default"
-                        if m not in seen:
-                            seen.add(m); mat_names.append(m)
-            f.write(struct.pack("<H", len(mat_names)))
-            for name in mat_names:
-                write_identifier(f, name)
-                f.write(b"\x00" * (12*3 + 4 + 1))
-                if target_version >= 1.9:
-                    f.write(b"\x00")
-
-            f.write(struct.pack("<H", len(sod.nodes)))
-            for node in sod.nodes.values():
-                f.write(struct.pack("<H", node.type))
-                write_identifier(f, node.name or "")
-                write_identifier(f, node.root or "")
-                f.write(struct.pack("<12f", *node.mat34))
-                if node.type == 12:
-                    write_identifier(f, node.emitter or "")
-                elif node.type == 1 and node.mesh:
-                    mesh = node.mesh
-
-                    if target_version >= 1.7:
-                        write_identifier(f, mesh.material or "default")
-
-                    if target_version >= 1.93:
-                        mesh_flags = 4 if mesh.illumination else 0
-                        f.write(struct.pack("<I", mesh_flags))
-                        num_textures = 2 if mesh.bumpmap else 1
-                        f.write(struct.pack("<I", num_textures))
-
-                    write_identifier(f, mesh.texture or "")
-
-                    if target_version == 1.91:
-                        f.write(struct.pack("<H", 0))
-                    elif target_version == 1.92:
-                        write_identifier(f, mesh.assimilation_texture or "")
-                        f.write(struct.pack("<H", 0))
-                    elif target_version >= 1.93:
-                        f.write(struct.pack("<I", 0))
-                        if mesh.bumpmap:
-                            write_identifier(f, mesh.bumpmap or "")
-                            f.write(struct.pack("<I", 512))  # bump flag
-                        write_identifier(f, mesh.assimilation_texture or "")
-                        f.write(struct.pack("<H", 0))
-
-                    f.write(struct.pack("<H", len(mesh.verts)))
-                    f.write(struct.pack("<H", len(mesh.tcs)))
-                    f.write(struct.pack("<H", len(mesh.groups)))
-                    for (x,y,z) in mesh.verts:
-                        f.write(struct.pack("<3f", x, y, z))
-                    for (u,v) in mesh.tcs:
-                        f.write(struct.pack("<2f", u, v))
-                    for g in mesh.groups:
-                        f.write(struct.pack("<H", len(g.faces)))
-                        write_identifier(f, g.material or "default")
-                        for face in g.faces:
-                            for k in range(3):
-                                f.write(struct.pack("<H", face.indices[k]))
-                                f.write(struct.pack("<H", face.tc_indices[k]))
-                    f.write(struct.pack("<b", mesh.cull_type if isinstance(mesh.cull_type, int) else 0))
-                    f.write(struct.pack("<H", 0))
-
-            anim_items = []
-            for name, ch in sod.channels.items():
-                if 'mats' in ch and ch['mats']:
-                    anim_items.append((name, ch['atype'], 'mats', ch['mats']))
-                elif 'scalars' in ch and ch['scalars']:
-                    anim_items.append((name, ch['atype'], 'scalars', ch['scalars']))
-            f.write(struct.pack("<H", len(anim_items)))
-            for name, atype, kind, data in anim_items:
-                write_identifier(f, name or "")
-                kf = len(data)
-                f.write(struct.pack("<H", kf))
-                if kind == 'mats':
-                    f.write(struct.pack("<I", 48 * kf))
-                    f.write(struct.pack("<H", atype if isinstance(atype, int) else 0))
-                    for m in data:
-                        f.write(struct.pack("<12f", *m))
-                else:
-                    f.write(struct.pack("<I", 4 * kf))
-                    f.write(struct.pack("<H", atype if isinstance(atype, int) else 5))
-                    for s in data:
-                        f.write(struct.pack("<f", float(s)))
-
-            if target_version not in (1.4, 1.5):
-                f.write(struct.pack("<H", 0))
+            
+        sod.version = target_version
+        sod.to_file(out_path)
 
         print(f"[save] wrote {out_path} (v{target_version:.2f})")
 

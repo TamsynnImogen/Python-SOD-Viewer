@@ -55,7 +55,7 @@ class Identifier:
             array += struct.pack("<H", 0)
             return array
         array += struct.pack("<H", len(self.name))
-        array += self.name.encode(encoding="ascii", errors="replace")
+        array += self.name.encode(encoding="utf-8", errors="replace")
         return array
 
 @dataclass
